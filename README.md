@@ -1,364 +1,419 @@
-# TCSMS — Customer & Subscription Management
+# Telecom Customer and Subscription Management System
 
-The default application now implements the supplied **Customer & Subscription
-Management** case study: customer/admin login, onboarding, plans, SIMs,
-subscriptions, usage, bills, confirmed payments, complaints and reports.
+TCSMS is a Java console application that manages the telecom customer journey: registration, SIM activation, plan subscriptions, usage, monthly billing, payment recording and customer support. Customers and administrators have separate workflows backed by a persistent MySQL database.
 
-Start with the [current setup and architecture guide](docs/SETUP.md) and
-[requirements, gap analysis and verification report](docs/IMPLEMENTATION.md).
-Copy `tcsms.properties.example` to ignored `tcsms.properties`, configure **your
-own** MySQL account, then run:
+The application runs in a terminal. No browser, frontend server or JavaScript package manager is required. The repository also retains an older service-assurance and trouble-ticket application, accessible through an explicit legacy command.
+
+## Contents
+
+- [Features](#features)
+- [Technology and dependencies](#technology-and-dependencies)
+- [Installation and startup](#installation-and-startup)
+- [Configuration](#configuration)
+- [Using the application](#using-the-application)
+- [How it works](#how-it-works)
+- [Project structure](#project-structure)
+- [Testing](#testing)
+- [Troubleshooting](#troubleshooting)
+- [Legacy application](#legacy-application)
+- [Further documentation](#further-documentation)
+
+## Features
+
+| Area | Capabilities |
+|---|---|
+| Authentication | Password login, single-use text CAPTCHA, account lockout, sessions, login history and OTP recovery |
+| Customers | Registration, profile updates, account activation and deactivation |
+| Plans | Administrator maintenance, search, price/data filters, sorting and comparison |
+| SIMs and connections | Physical SIM/eSIM inventory, unique mobile numbers and multiple customer connections |
+| Subscriptions | Plan upgrades/downgrades, permitted prepaid/postpaid changes, add-ons and change history |
+| Usage | Persistent voice, SMS, data and roaming events, monthly allowances and calculated overage charges |
+| Billing | Monthly invoices, rental, usage charges, discounts, tax and due dates |
+| Payments | Confirmed external-payment records, full-amount validation and duplicate prevention |
+| Support | Customer complaints, administrator resolution and an application notification inbox |
+| Reports | Eight analytics reports, each exportable to CSV and text |
+| Background processing | Billing, usage processing, notification delivery and overdue/expiry monitoring |
+
+Services enforce roles and customer ownership independently of the menus. Passwords use salted PBKDF2 hashing, SQL values are bound through prepared statements, and financial operations use JDBC transactions and database constraints.
+
+## Technology and dependencies
+
+| Component | Version / requirement | Purpose |
+|---|---|---|
+| JDK | 25 | Compilation and application runtime |
+| Apache Maven | 3.9+; developed with 3.9.11 | Dependency resolution, compilation, tests and packaging |
+| MySQL Server | 8.0.16+ | Persistent database with enforced check constraints |
+| MySQL Connector/J | 8.0.30 | Runtime JDBC driver |
+| JUnit | 4.13.2, test scope | Automated tests |
+| H2 | 2.2.224, test scope | Isolated relational integration tests |
+| Python | 3, optional | Disposable MySQL tests and credential-audit scripts |
+
+The Java standard library provides streams, collections, concurrency, HTTP delivery, cryptography, file handling and logging. The code demonstrates Java 8 APIs, but the project targets Java release 25.
+
+Maven installs the dependencies declared in [pom.xml](pom.xml). The first build requires access to Maven Central. Project settings are selected through `.mvn/maven.config` and [maven-settings.xml](maven-settings.xml), with a local cache at `${user.home}/.m2/repository-tsatms`. Once dependencies and plugins are cached, an offline build can use `mvn -o package`.
+
+## Installation and startup
+
+Run the following commands from the repository root. Examples use PowerShell and a local MySQL installation.
+
+### 1. Check prerequisites
 
 ```powershell
-mvn test
+java -version
+mvn -version
+mysql --version
+```
+
+Maven must use JDK 25 or newer. Start a MySQL server you own before configuring the application.
+
+### 2. Create the database and account
+
+Connect using your local MySQL administrator account:
+
+```powershell
+mysql -h localhost -u root -p
+```
+
+If the Windows client is not on `PATH`, use its installation path:
+
+```powershell
+& "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql.exe" -h localhost -u root -p
+```
+
+Run the following SQL, replacing the password placeholder before execution:
+
+```sql
+CREATE DATABASE tcsms
+  CHARACTER SET utf8mb4
+  COLLATE utf8mb4_0900_ai_ci;
+
+CREATE USER 'tcsms_app'@'localhost'
+  IDENTIFIED BY 'REPLACE_WITH_YOUR_OWN_STRONG_PASSWORD';
+
+GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, INDEX, REFERENCES
+  ON tcsms.* TO 'tcsms_app'@'localhost';
+
+EXIT;
+```
+
+These grants are for local development. Remote deployments require an account host appropriate to the application server. If these database or account names already exist, check ownership and purpose before reusing them.
+
+The application does not create the MySQL database or account. After schema installation, a separate runtime identity can operate with SELECT, INSERT, UPDATE and DELETE privileges on the application schema.
+
+### 3. Create local configuration
+
+Copy the template only if a local configuration does not already exist:
+
+```powershell
+if (!(Test-Path tcsms.properties)) {
+    Copy-Item tcsms.properties.example tcsms.properties
+}
+```
+
+Edit `tcsms.properties`. A local development connection without TLS can use:
+
+```properties
+db.url=jdbc:mysql://localhost:3306/tcsms?sslMode=DISABLED&allowPublicKeyRetrieval=true&serverTimezone=Asia/Kolkata
+db.user=tcsms_app
+db.password=REPLACE_WITH_YOUR_OWN_STRONG_PASSWORD
+timezone=Asia/Kolkata
+tax.rate=0.18
+billing.due.days=20
+report.directory=reports/tcsms
+```
+
+Use the same password assigned to the MySQL application account. Do not surround property values with quotation marks. Java properties interpret backslashes as escapes; double a literal backslash or supply the password through an environment variable.
+
+The disabled-TLS URL is for local development only. Use verified TLS, such as `sslMode=VERIFY_IDENTITY`, and a trusted server certificate for remote connections. The supplied template defaults to verified TLS.
+
+The file is ignored by Git and loaded from the process working directory. Configuration changes do not require rebuilding. Keep personal credentials out of shared resource files.
+
+### 4. Build, initialize and check
+
+```powershell
 mvn package
 java -jar target/tsatms-jar-with-dependencies.jar --init
+java -jar target/tsatms-jar-with-dependencies.jar --check
+```
+
+The build runs the default tests and generates:
+
+| Artifact | Use |
+|---|---|
+| `target/tsatms-jar-with-dependencies.jar` | Runnable application with its JDBC dependency included |
+| `target/tsatms.jar` | Application classes/resources; runtime dependencies must be supplied separately |
+
+Artifact names retain the repository's original naming for compatibility.
+
+Initialization installs the separate `bss_*` tables and indexes. It is additive and repeatable; it does not drop tables or seed production records. MySQL DDL implicitly commits, so a failure may leave some schema objects installed. Correct the problem and rerun `--init`. Run one initializer at a time.
+
+A successful check prints:
+
+```text
+BSS database reachable; schema version 1.
+```
+
+### 5. Create your administrator and start
+
+```powershell
 java -jar target/tsatms-jar-with-dependencies.jar --create-admin
 java -jar target/tsatms-jar-with-dependencies.jar
 ```
 
-No default credentials or production demonstration records are installed.
+Administrator creation prompts for your application username, email and password. It only works when no administrator exists. These credentials are separate from the MySQL administrator and database-account credentials.
 
----
+There are no default login accounts or preloaded production plans, SIMs, customers or usage records. Empty lists are expected on first startup.
 
-# Legacy TSATMS — Telecom Service Assurance & Trouble Ticket Management System
+## Configuration
 
-**The retained documentation below describes the original, separate OSS product.
-Its commands now require `--legacy` before any flags**, for example
-`java -jar target/tsatms-jar-with-dependencies.jar --legacy --help`.
-Do not run legacy database setup on a database containing data you need: its
-original schema scripts drop/recreate legacy tables. The new BSS `--init` uses
-separate additive tables and never invokes those scripts.
+Environment variables take precedence over matching keys in local `tcsms.properties`. The application does not automatically read `.env` files. All configuration belongs to the local application process.
 
-A console-based telecom OSS for incident, fault, SLA and support management,
-built to the *Preboarding Batch* case study. Java 25 LTS, MySQL, Maven, no
-frontend.
-
-One incident is captured, prioritised against an SLA, assigned to the right
-engineer, escalated when it drifts, resolved, closed and rated — with a
-complete audit trail and a set of reports over the whole operation.
-
----
-
-## 1. What you need
-
-| | Version used | Notes |
+| Property | Environment variable | Default / requirement |
 |---|---|---|
-| JDK | 25 LTS | The project compiles with `--release 25`; use JDK 25 or newer. |
-| Maven | 3.9.11 | Tested build version; the build works offline once the connector is cached. |
-| MySQL | 8.0 | Running on `localhost:3306`. |
+| `db.url` | `TCSMS_DB_URL` | Required MySQL JDBC URL containing the schema name |
+| `db.user` | `TCSMS_DB_USER` | Required dedicated database account |
+| `db.password` | `TCSMS_DB_PASSWORD` | Required database password |
+| `timezone` | `TCSMS_TIMEZONE` | `Asia/Kolkata`; align with the JDBC timezone |
+| `tax.rate` | `TCSMS_TAX_RATE` | `0.18`; fraction between 0 and 1 |
+| `billing.due.days` | `TCSMS_BILLING_DUE_DAYS` | `20`; permitted range 1-365 days after invoice issue |
+| `report.directory` | `TCSMS_REPORT_DIRECTORY` | `reports/tcsms`; must be writable |
+| `recovery.url` | `TCSMS_RECOVERY_URL` | HTTPS delivery endpoint; required for password recovery |
+| `recovery.token` | `TCSMS_RECOVERY_TOKEN` | Bearer token for the delivery endpoint |
 
-Only one external dependency: `mysql-connector-java` 8.0.30. There is no
-test framework and no logging library — verification is built in, and
-logging goes through `java.util.logging`.
+Obtain database values from your own MySQL installation or hosting administrator. Recovery settings come from an HTTPS delivery service you operate or configure. Core workflows work without that endpoint; password recovery requires it.
 
----
+### Password recovery integration
 
-## 2. Getting it running
+The recovery adapter sends an HTTPS POST authenticated with `Authorization: Bearer <configured-token>`. Its JSON payload has this shape:
 
-### Step 1 — tell it about your database
+```json
+{
+  "recipient": "registered-address@example.com",
+  "code": "<generated-one-time-code>",
+  "expiresInSeconds": 300
+}
+```
 
-Everything configurable lives in `src/main/resources/application.properties`.
-The three password values ship blank on purpose — real ones are kept out of
-version control. Fill them in before the first run:
+The endpoint must deliver the code to the registered recipient and return a successful 2xx response. Redirects are refused and timeouts are bounded. Live delivery needs separate verification. The application does not print codes in place of delivering them.
 
-| Property | What it is |
+## Using the application
+
+The opening menu offers Customer Login, New Customer Registration, Administrator Login, Forgot Password and Exit.
+
+A typical first-use sequence is:
+
+1. Sign in as the administrator and create an active base plan.
+2. Add available physical SIM/eSIM inventory with unique SIM and mobile numbers.
+3. Log out and register a customer through the opening menu.
+4. Sign in as the customer and subscribe using an available SIM type.
+5. Import actual usage events through the administrator dashboard.
+6. Review processed usage and generate an invoice after the billing month closes.
+7. Record a confirmed external payment against the full outstanding invoice amount.
+8. Submit and resolve complaints, inspect notifications and export reports.
+
+Use a native terminal for masked password input. If masking is unavailable, the console displays a warning. Logout revokes the session; end-of-input exits the interactive console.
+
+### Commands
+
+Use one current-application command at a time:
+
+| Command | Behavior |
 |---|---|
-| `db.admin.username` / `db.admin.password` | A MySQL account that may `CREATE DATABASE` and `CREATE USER`. Used **only** by `--setup-db`. |
-| `db.username` / `db.password` | The account the application itself uses. `--setup-db` creates it. |
-| `security.demo.password` | The password given to every seeded account. Must satisfy the policy: 8+ characters with an upper case letter, a lower case letter, a digit and a symbol. |
+| No argument, or `--console` | Check the schema, start workers and open the console |
+| `--init` | Install the additive BSS schema and indexes |
+| `--check` | Check connectivity and the schema-version marker |
+| `--create-admin` | Create the first administrator interactively |
+| `--workers` | Run background processes without interactive menus |
+| `--help` | Print commands without requiring a database |
 
-### Step 2 — build
+For unattended background processing:
 
-```bash
-mvn -DskipTests package
+```powershell
+java -jar target/tsatms-jar-with-dependencies.jar --workers
 ```
 
-This produces `target/tsatms-jar-with-dependencies.jar`, which runs with a
-plain `java -jar` and no classpath wiring.
+Use a process manager and a restricted operating-system account for deployment. If starting from another working directory, provide environment variables or place `tcsms.properties` in that directory. Ctrl+C stops an unattended process.
 
-The build picks up `maven-settings.xml` from the project root automatically,
-because `.mvn/maven.config` passes `-s maven-settings.xml`. That file
-resolves against Maven Central and uses its own local repository at
-`~/.m2/repository-tsatms`. Your machine-wide `~/.m2/settings.xml` is not
-read and not modified — on a corporate machine it often mirrors everything
-to an internal host, which would fail here, and other work depends on it.
-Add `-o` to build offline once the connector is cached.
+## How it works
 
-### Step 3 — create the database
+### Architecture and persistence
 
-```bash
-java -jar target/tsatms-jar-with-dependencies.jar --setup-db
+```text
+Terminal input
+    -> TelecomConsole
+    -> Authentication and domain services
+    -> Role, ownership and business-rule validation
+    -> BssStore JDBC transaction
+    -> MySQL tables, histories, notifications and audit records
 ```
 
-Runs the first seven scripts in `src/main/resources/db` in order: the
-bootstrap (database and application account), the schema, functions,
-triggers, views, procedures and seed data. The eighth,
-`07_sample_queries.sql`, is a reference library and is not executed.
+The console handles input and presentation. Services enforce business rules and permissions. `BssStore` centralizes prepared statements, row mapping, generated keys, batching, savepoints and transaction boundaries. A failed transaction rolls back its changes.
 
-### Step 4 — give the accounts a password
+The schema contains 19 BSS tables. Users link to customer profiles; customers own subscriptions; subscriptions reference SIMs and plans and have usage, invoices and complaints. Payments reference invoices. Supporting tables store plan/add-on history, monthly terms, sessions, recovery codes, login history, notifications, audits and schema metadata.
 
-```bash
-java -jar target/tsatms-jar-with-dependencies.jar --provision-users
-```
+Foreign keys, uniqueness rules, check constraints and indexes protect relationships and identifiers. Immutable domain requests and generic row projections separate console inputs from JDBC results. DAO, Factory and Strategy patterns organize data access and report output.
 
-The seed script writes a sentinel into `password_hash`, because SQL cannot
-produce a PBKDF2 hash. This replaces the sentinels with real salted hashes
-and activates the accounts. Each account gets its own salt, so the shared
-demo password still produces a different stored hash in every row.
+### Business rules
 
-### Step 5 — run it
+- Registration requires age 18 or older, mandatory profile fields, unique username/email/contact mobile, and a password satisfying the password policy.
+- Customers may have multiple connections with distinct base plans. Duplicate selection of the same base plan for the same customer is rejected.
+- Inactive plans cannot be selected. Current-plan minimum tenure and mutual type-conversion permission restrict changes. Historical plans are retired and versioned rather than repriced.
+- Billing follows calendar months. The start-of-month base plan, or first plan for a new connection, plus add-ons active at the start defines the monthly pricing snapshot.
+- Midmonth selections affect billing in the next calendar month. Opened snapshots remain fixed. There is no prorating; a first partial month has full rental.
+- Usage requires a unique source reference and canonical units: GB for data/roaming, MINUTES for voice and COUNT for SMS. Monthly allowances apply before overage rates.
+- Invoices are generated only for completed months, once per connection/month. Money uses `BigDecimal`, and tax applies after discount. Late usage for an invoiced month is rejected.
+- A payment must match the full outstanding amount and have a unique confirmation reference. Payment, bill status, notification and audit commit together. Subscription/bill locks prevent concurrent double payment.
+- Overdue subscriptions and expired prepaid validity are monitored automatically. Administrators can reactivate subscriptions after overdue bills are paid.
 
-```bash
-java -jar target/tsatms-jar-with-dependencies.jar
-```
+Payment modes describe externally confirmed transactions. The application does not initiate UPI transfers, charge cards or settle funds. It does not implement prepaid wallets, prorating, credit notes or cancellation. Contract rental continues during subscription suspension.
 
-Startup checks, then the sign-in screen.
+### Background processes
 
----
-
-## 3. Every command
-
-`--help` prints this list.
-
-**Setting up**
-
-| Switch | What it does |
-|---|---|
-| `--setup-db` | Build the schema, logic and seed data from scratch. |
-| `--refresh-db-logic` | Reload only the functions, views, procedures and triggers. |
-| `--provision-users` | Give the seeded accounts their password. |
-| `--check` | Run the startup checks and stop. |
-
-**Using it**
-
-| Switch | What it does |
-|---|---|
-| *(none)* | Startup checks, then the sign-in screen. |
-| `--login` | The sign-in screen without the checks. |
-| `--demo` | Walk one incident through the whole system, then roll it back. |
-| `--sla` | Print the SLA board. |
-| `--reports` | Build all seven reports and export them to CSV and text. |
-
-**Proving it works** — eleven harnesses, 1,470 assertions, all against the
-live database.
-
-| Switch | Covers | Checks |
+| Worker | Schedule | Responsibility |
 |---|---|---|
-| `--verify-db` | All 7 views, all 5 functions, 3 procedures, 2 triggers | prints results |
-| `--verify-dao` | The data access layer | 82 |
-| `--verify-security` | CAPTCHA, hashing, OTP, lockout, role-based access | 154 |
-| `--verify-sla` | The SLA engine and its clocks | 156 |
-| `--verify-ticket` | The ticket lifecycle, and `sp_resolve_ticket` | 186 |
-| `--verify-events` | Notifications and the audit trail | 130 |
-| `--verify-assign` | Engineer recommendation and assignment | 133 |
-| `--verify-escalation` | The escalation ladder | 164 |
-| `--verify-threads` | The background workers | 154 |
-| `--verify-reports` | Stream analytics and the reports | 190 |
-| `--verify-console` | The dashboards, driven from scripted input | 121 |
+| BillingScheduler | At startup, then hourly | Generate missing invoices for the previous completed month |
+| PaymentNotificationService | At startup, then every 2 seconds | Deliver pending records to the application inbox |
+| UsageProcessor | Queue wakeup or approximately every 2 seconds | Process durably stored pending usage |
+| AccountMonitor | At startup, then every 60 seconds | Identify overdue subscriptions and expired prepaid validity |
 
-Every harness that writes does so inside a transaction rolled back to a
-savepoint, so they can be run repeatedly and in any order. `SEVERE` lines in
-the events, threads and console output are deliberate failure injections —
-the harness proving a failure is contained.
+Executors run the workers, and a bounded blocking queue supplies usage wakeups. Database records survive restarts and remain authoritative. Failures are logged, pending work can be retried, and shutdown closes executors. Run one scheduler process per deployment. Administrators can generate older missed billing months individually.
 
----
+### Reports
 
-## 4. Start with `--demo`
+Reports cover highest usage by customer and usage type, customers by city, price-range plans, most-subscribed plans, monthly confirmed-payment revenue, usage by type, customers with unpaid bills, and monthly revenue per registered customer.
 
-The fastest way to see the whole system is:
+Each exports to CSV and text in the configured directory. Quantities remain grouped by type/unit, and financial totals use decimal arithmetic. CSV output escapes cells that could be interpreted as spreadsheet formulas. Restrict access to exports because they contain customer information.
 
-```bash
-java -jar target/tsatms-jar-with-dependencies.jar --demo
+### Authentication
+
+Three failed attempts cause a 15-minute lock. Sessions expire after eight hours and are stored as token hashes. Recovery codes expire after five minutes, allow three guesses and have a one-minute resend cooldown. Successful recovery revokes existing sessions. Customer reads and writes are scoped to owned records, and administrator actions require the database-backed administrator role.
+
+## Project structure
+
+```text
+.
+|-- pom.xml                         Dependencies, tests and packaging
+|-- maven-settings.xml              Project-scoped Maven settings
+|-- tcsms.properties.example        Safe configuration template
+|-- docs/
+|   |-- SETUP.md                    Detailed setup and architecture
+|   `-- IMPLEMENTATION.md           Requirements and verification record
+|-- scripts/
+|   |-- test_mysql.py               Disposable MySQL and packaged-JAR checks
+|   `-- audit_configuration.py      Redacted credential-pattern audit
+|-- src/main/java/com/amdocs/telecom/
+|   |-- bss/
+|   |   |-- controller/             Console menus
+|   |   |-- service/                Authentication and domain operations
+|   |   |-- dao/                    JDBC access and schema installation
+|   |   |-- model/                  Domain requests and sessions
+|   |   |-- validation/             Shared input rules
+|   |   |-- security/               HTTPS recovery delivery
+|   |   |-- scheduler/              Background workers
+|   |   |-- report/                 Analytics and export writers
+|   |   |-- util/                   Local/environment configuration
+|   |   `-- main/                   Current application entry point
+|   `-- ...                         Shared utilities and legacy OSS
+|-- src/main/resources/
+|   |-- bss/                        Schema, index reference and SQL examples
+|   `-- db/                         Separate legacy database scripts
+`-- src/test/java/com/amdocs/telecom/bss/
+    |-- BssIntegrationTest.java
+    |-- BssDatabaseDiagnosticsTest.java
+    `-- BssMySqlIT.java
 ```
 
-It follows one incident end to end in eighteen scenes, each headed with the
-case-study section it comes from — `4. Who should take it   [section 7]` —
-so the output doubles as a guided tour of the document:
+Local properties, generated reports, logs and build output are ignored by Git. Keep real credentials out of shared templates and source files.
 
-- The service desk signs in, and what that role may do *(section 2)*
-- A `LINK_DOWN` alarm arrives and opens a ticket with nobody involved *(11)*
-- The ticket, laid out as the card in section 5 *(4, 5, 6)*
-- The best engineers for it, ranked by the five criteria *(7, 16)*
-- Assignment, and every row the single commit wrote *(19)*
-- What the SLA says, and how long is left *(8)*
-- Escalation up the ladder *(9)*
-- The engineer signs in, diagnoses and resolves *(2, 10)*
-- The service desk closes it *(14)*
-- The customer signs in, sees their ticket and rates it *(2, 13)*
-- The complete status trail and the audit rows *(10)*
-- The manager signs in for the notifications, the operations summary, the
-  analytics and a report *(2, 12, 15, 16, 18)*
+## Testing
 
-Four real logins, each through the real CAPTCHA, password and OTP — no
-shortcuts and no test doubles. The whole thing runs inside one transaction
-that is rolled back at the end, so it can be run as often as you like and
-always tells the same story.
+### Default suite
 
----
-
-## 5. How it is put together
-
-```
-com.amdocs.telecom
-├── controller    the four dashboards, the menu framework, the sign in screen
-├── service       business operations, one interface per area
-│   ├── impl          the implementations
-│   ├── analytics     the Stream API analyses of section 16
-│   ├── assignment    engineer matching
-│   ├── escalation    the ladder and its policy
-│   ├── event         network alarms and ticket events
-│   └── sla           SLA evaluation and clocks
-├── dao           one interface per table, plus the transaction template
-│   └── impl          JDBC implementations
-├── model         the entities of section 20, and their enums
-├── dto           read models for screens and reports
-├── exception     one hierarchy under TSATMSException
-├── validation    field rules and the lifecycle state machine
-├── security      CAPTCHA, hashing, OTP, sessions, permissions
-├── scheduler     the background workers of section 17
-├── report        the report model, writers and exporter
-├── util          configuration, logging, console, bootstrapping
-└── main          the entry point and the demonstration
+```powershell
+mvn test
 ```
 
-Every operation that changes something goes through a service, and every
-service method that changes something checks the caller's permission first —
-because who may do a thing is part of the operation, not something a caller
-can be trusted to remember. A DAO never knows a `UserSession` exists.
+The default suite contains 29 JDBC/console integration tests and two database-diagnostic tests. Integration tests use isolated H2 databases in MySQL compatibility mode and synthetic fixtures, without personal database credentials.
 
-Read-only view projections are the one deliberate exception: a dashboard
-listing `vw_open_tickets` calls `ReportDAO` directly rather than through a
-service that would only delegate. Those menu options are permission-guarded
-at the menu, so the check still happens; what is skipped is a layer with no
-rule in it.
+Coverage includes registration, authentication, ownership, subscriptions, usage, invoices, payment rollback/concurrency, complaints, background processing, all eight report outputs and console workflows. H2 and JUnit are test-only and are excluded from the runtime JAR.
 
-### Design patterns
+### MySQL and packaged startup checks
 
-The case study asks for at least three. Six are used, each because it
-solved a problem rather than to fill the list:
+With Python and MySQL server/client tools installed:
 
-| Pattern | Where | Why |
-|---|---|---|
-| **Singleton** | `ConfigLoader`, `DBConnection`, `DAOFactory` | One configuration, one pool, one set of DAOs. |
-| **DAO** | `dao` and `dao.impl` | Every SQL statement is behind an interface, so the service layer holds no JDBC. |
-| **Factory** | `DAOFactory`, `ReportFormat.newWriter()` | The caller asks for the kind, not the class. |
-| **Strategy** | `SlaClock`, `ReportWriter` | Business-hours vs continuous SLA clocks, and CSV vs text output, differ only in the algorithm. |
-| **Observer** | `TicketEventPublisher` and its listeners | Notifications and the audit trail both react to the same events without the ticket service knowing either exists. |
-| **Template Method** | `Dashboard.open()`, `BackgroundWorker` | The sequence is fixed once; subclasses supply only what differs. |
+```powershell
+python scripts/test_mysql.py
+```
 
-### The transaction rule
+To check the built executable as well:
 
-Every mutation that touches more than one table runs through
-`TransactionTemplate`. It holds the connection in a `ThreadLocal`, so a
-nested call joins the transaction already running rather than opening a
-second one, and only the outermost block commits.
+```powershell
+mvn package
+python scripts/test_mysql.py --smoke-jar
+```
 
-Section 19's assignment is the worked example: validate the ticket, validate
-the engineer, check availability, assign, update the ticket, write the
-status history, write the notification, write the audit record, commit. Any
-one of those failing rolls back all of them, so a ticket can never show an
-engineer who was never told about it.
+If MySQL tools are not on `PATH`:
 
----
+```powershell
+python scripts/test_mysql.py --mysql-bin "C:\Program Files\MySQL\MySQL Server 8.0\bin" --smoke-jar
+```
 
-## 6. The demonstration data
+The helper creates a separate data directory under `target`, binds a fresh loopback port, generates random credentials, runs the 29-test MySQL contract and stops its server. It does not use the installed service or `tcsms.properties`. Optional JAR checks cover schema installation, connectivity, administrator provisioning and console startup. Diagnostics remain under `target/mysql-test-*`.
 
-`06_seed_data.sql` loads:
+### Additional checks
 
-- **4 SLA bands** exactly as tabulated in section 8
-- **17 login accounts** — 2 service desk, 1 manager, 6 engineers, 8 customers
-- **6 engineers**, the first four being section 7's worked example
-- **8 customers** across all three types, in five regions, with **14 services**
-- **15 tickets** covering all eight statuses and all four priorities, nine of
-  the ten incident categories, both met and breached SLAs, and one raised
-  automatically from an alarm. `TT-2026-004521` is section 5's sample ticket,
-  field for field.
-- **Network events** including section 11's `NE-884521` on `MUM-RAN-045`
-- Status history, escalation history and feedback for the tickets that have
-  them
+```powershell
+java -jar target/tsatms-jar-with-dependencies.jar --help
+python scripts/audit_configuration.py
+git diff --check
+```
 
-Ticket timestamps are relative to `NOW()`, so the SLA states stay realistic
-whenever the seed is loaded. `sla_deadline` is deliberately left out of the
-insert so the `BEFORE INSERT` trigger derives it — which also proves the
-trigger works.
+Credential scanning reports candidate locations without revealing values. Findings require review; this heuristic does not prove that no secret has ever been exposed.
 
-Notifications, audit rows and login history are not seeded. They are
-consequences of things happening, and the system writes them itself — a
-seeded audit trail would be a fiction, and would hide whether the real one
-works.
+Live OTP delivery, production deployment and million-customer load performance need separate verification. Stream-based analytics currently materialize their input in memory.
 
-Two gaps, stated rather than hidden: no seeded ticket uses the `OTHER`
-category, and four of the eight resolution codes (`SOFTWARE_FAILURE`,
-`FIBER_CUT`, `POWER_FAILURE`, `UNKNOWN`) do not appear in seeded rows. All
-of them are implemented, selectable in the console and exercised by the
-harnesses; they simply are not pre-loaded. `--demo` resolves its ticket with
-`FIBER_CUT`.
+## Troubleshooting
 
----
-
-## 7. The database
-
-Thirteen tables — `users`, `customers`, `telecom_services`,
-`network_engineers`, `sla_configuration`, `trouble_tickets`,
-`ticket_status_history`, `escalation_history`, `network_events`,
-`notifications`, `feedback`, `audit_log`, `login_history` — normalised, with
-primary keys, foreign keys, unique constraints, `NOT NULL` where a value is
-required, check constraints, status columns, created/updated timestamps and
-indexes on the columns actually filtered on.
-
-Beyond the tables:
-
-| | |
+| Symptom | Check or action |
 |---|---|
-| **7 views** | `vw_ticket_details`, `vw_open_tickets`, `vw_engineer_workload`, `vw_sla_compliance`, `vw_category_incidents`, `vw_customer_repeat_incidents`, `vw_manager_dashboard` |
-| **5 functions** | `fn_sla_deadline`, `fn_sla_response_deadline`, `fn_sla_status`, `fn_resolution_hours`, `fn_minutes_remaining` |
-| **6 procedures** | `sp_assign_engineer`, `sp_escalate_ticket`, `sp_resolve_ticket`, `sp_recommend_engineers`, `sp_ticket_volume_report` — all five called from Java through `ReportDAO` — and `sp_manager_dashboard`, exercised by `--verify-db` |
-| **4 triggers** | `trg_tickets_before_insert` derives the SLA deadlines; `trg_tickets_before_update` stamps resolution and closure times; `trg_engineers_after_update` keeps the workload count honest; `trg_notifications_before_update` stamps the send time |
+| MySQL error `1045`, SQL state `28000` | Login was rejected. Verify the database username/password, environment overrides and account host grants. |
+| MySQL error `1049` | Create the database named in the JDBC URL or correct that name. |
+| MySQL error `1044`, `1142`, `1143` or `1227` | Ask the database administrator to grant the required schema permissions. |
+| MySQL error `1146` | Required tables are missing. Check the selected database and run `--init`. |
+| Connection or TLS failure | Check the MySQL service, host, port, firewall and TLS/certificate settings. |
+| Missing required property | Check the working directory, local configuration and matching environment variables. |
+| Recovery delivery unavailable | Configure both recovery settings and verify the HTTPS endpoint. |
+| Empty lists or reports | Populate the relevant plans, SIMs, customers and transactions; no production demonstration data is seeded. |
+| Administrator already exists | Use the existing account or configured recovery. Provisioning does not reset an existing account. |
+| Password input visible | Use a native terminal that supports masked input. |
+| Unsupported Java release | Check `JAVA_HOME` and `mvn -version`; Maven must use JDK 25 or newer. |
 
-`07_sample_queries.sql` is a library of the SQL the common requirement asks
-to be demonstrated: joins, left joins, `GROUP BY`/`HAVING`, subqueries,
-`CASE`, aggregates and date functions, each with a comment explaining the
-question it answers.
+For error 1045, test the same database account independently:
 
-Every statement is a `PreparedStatement` and every **value** is bound as a
-parameter. SQL text is assembled by concatenation in exactly two places —
-the fixed `('RESOLVED', 'CLOSED', 'CANCELLED')` status list, and the table
-and column names each DAO returns from `tableName()` and `idColumn()` — and
-both are compile-time constants. Nothing a user typed ever reaches SQL text.
+```powershell
+mysql -h localhost -u tcsms_app -p -D tcsms
+```
 
----
+A MySQL administrator can reset that account with `ALTER USER`; update the local application password to match afterward. Do not place passwords in command-line arguments or share them in troubleshooting output.
 
-## 8. Where things are logged and written
+Maven may print a `sun.misc.Unsafe` deprecation warning from its bundled Guice library on JDK 25. Check the final build result and test summary. A successful build does not verify personal database configuration.
 
-| | Path |
-|---|---|
-| Log files | `logs/tsatms.log.N` — `INFO` and above to file, `WARNING` and above to console |
-| Exported reports | `reports/` |
-| Configuration | `src/main/resources/application.properties` |
+## Legacy application
 
----
+TSATMS is the retained service-assurance and trouble-ticket OSS. It includes incident assignment, SLA monitoring, escalation and legacy reports, with separate roles, configuration and schema scripts.
 
-## 9. Requirement traceability
+```powershell
+java -jar target/tsatms-jar-with-dependencies.jar --legacy --help
+```
 
-[`TRACEABILITY.md`](TRACEABILITY.md) maps every numbered section of the case
-study, and every item in the four common requirement lists, to the code that
-implements it and the check that proves it.
+All legacy switches require the `--legacy` prefix. Legacy schema scripts can drop and recreate tables; do not use them to initialize TCSMS or run them against data you need to preserve. The current BSS reads `tcsms.properties` and does not fall back to legacy database credentials.
 
----
+Retained legacy details are in [TRACEABILITY.md](TRACEABILITY.md) and [INFORMATION.md](INFORMATION.md). Current product coverage is documented separately.
 
-## 10. Notes and known limits
+## Further documentation
 
-- **There is no SMS gateway.** The one-time password is printed on screen,
-  as the case study's console scope implies. The same is true of the
-  self-service password reset, which therefore reveals whether an account
-  exists — noted in the javadoc rather than papered over.
-- **CAPTCHA is text, not an image.** A terminal cannot show a distorted
-  bitmap. The characters are spaced and framed, which keeps the step honest
-  in the flow without pretending to be image recognition.
-- **A locked account cannot self-serve a password reset.** The lockout is
-  the defence against guessing, and a route around it would have to be at
-  least as hard to pass as the guessing it prevents.
-- **Passwords are PBKDF2-WithHmacSHA256** with a per-account salt. No
-  password value is ever logged or printed anywhere.
-"# telcom-project" 
+- [Detailed setup and architecture](docs/SETUP.md): configuration, integrations, billing decisions and deployment guidance.
+- [Implementation and requirements report](docs/IMPLEMENTATION.md): original gaps, requirement mapping, verification and limitations.
+- [Configuration template](tcsms.properties.example): supported settings with safe placeholders.
+- [BSS schema](src/main/resources/bss/schema.sql): tables and constraints.
+- [SQL reference](src/main/resources/bss/sample_queries.sql): joins, grouping, subqueries and reporting aggregates.
