@@ -2,7 +2,13 @@
 
 TCSMS is a Java console application that manages the telecom customer journey: registration, SIM activation, plan subscriptions, usage, monthly billing, payment recording and customer support. Customers and administrators have separate workflows backed by a persistent MySQL database.
 
-The application runs in a terminal. No browser, frontend server or JavaScript package manager is required. The repository also retains an older service-assurance and trouble-ticket application, accessible through an explicit legacy command.
+The application runs in a terminal. No browser, frontend server or JavaScript package manager is required.
+
+After completing the setup below, run the application from the project root:
+
+```powershell
+java -jar target/tsatms-jar-with-dependencies.jar
+```
 
 ## Contents
 
@@ -15,7 +21,6 @@ The application runs in a terminal. No browser, frontend server or JavaScript pa
 - [Project structure](#project-structure)
 - [Testing](#testing)
 - [Troubleshooting](#troubleshooting)
-- [Legacy application](#legacy-application)
 - [Further documentation](#further-documentation)
 
 ## Features
@@ -313,10 +318,9 @@ Three failed attempts cause a 15-minute lock. Sessions expire after eight hours 
 |   |   |-- report/                 Analytics and export writers
 |   |   |-- util/                   Local/environment configuration
 |   |   `-- main/                   Current application entry point
-|   `-- ...                         Shared utilities and legacy OSS
+|   `-- ...                         Shared application utilities
 |-- src/main/resources/
 |   |-- bss/                        Schema, index reference and SQL examples
-|   `-- db/                         Separate legacy database scripts
 `-- src/test/java/com/amdocs/telecom/bss/
     |-- BssIntegrationTest.java
     |-- BssDatabaseDiagnosticsTest.java
@@ -397,18 +401,6 @@ mysql -h localhost -u tcsms_app -p -D tcsms
 A MySQL administrator can reset that account with `ALTER USER`; update the local application password to match afterward. Do not place passwords in command-line arguments or share them in troubleshooting output.
 
 Maven may print a `sun.misc.Unsafe` deprecation warning from its bundled Guice library on JDK 25. Check the final build result and test summary. A successful build does not verify personal database configuration.
-
-## Legacy application
-
-TSATMS is the retained service-assurance and trouble-ticket OSS. It includes incident assignment, SLA monitoring, escalation and legacy reports, with separate roles, configuration and schema scripts.
-
-```powershell
-java -jar target/tsatms-jar-with-dependencies.jar --legacy --help
-```
-
-All legacy switches require the `--legacy` prefix. Legacy schema scripts can drop and recreate tables; do not use them to initialize TCSMS or run them against data you need to preserve. The current BSS reads `tcsms.properties` and does not fall back to legacy database credentials.
-
-Retained legacy details are in [TRACEABILITY.md](TRACEABILITY.md) and [INFORMATION.md](INFORMATION.md). Current product coverage is documented separately.
 
 ## Further documentation
 
