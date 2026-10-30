@@ -10,12 +10,11 @@
     <version>1.0.0</version>
     <packaging>jar</packaging>
 
-    <name>Telecom Service Assurance and Trouble Ticket Management System</name>
-    <description>Console based Telecom OSS for incident, fault, SLA and support management</description>
+    <name>Telecom Customer and Subscription Management System</name>
+    <description>Console BSS for customers, subscriptions, usage, billing and payments; includes legacy service assurance OSS</description>
 
     <properties>
-        <maven.compiler.source>1.8</maven.compiler.source>
-        <maven.compiler.target>1.8</maven.compiler.target>
+        <maven.compiler.release>25</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <mainClass>com.amdocs.telecom.main.TSATMSApplication</mainClass>
@@ -23,6 +22,18 @@
     </properties>
 
     <dependencies>
+        <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <version>2.2.224</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>junit</groupId>
+            <artifactId>junit</artifactId>
+            <version>4.13.2</version>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>mysql</groupId>
             <artifactId>mysql-connector-java</artifactId>
@@ -47,11 +58,15 @@
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.2.5</version>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.8.1</version>
+                <version>3.16.0</version>
                 <configuration>
-                    <source>1.8</source>
-                    <target>1.8</target>
+                    <release>${maven.compiler.release}</release>
                     <encoding>UTF-8</encoding>
                     <showDeprecation>true</showDeprecation>
                     <showWarnings>true</showWarnings>

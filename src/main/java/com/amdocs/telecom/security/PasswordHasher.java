@@ -113,7 +113,11 @@ public final class PasswordHasher {
         // Compared as bytes through MessageDigest.isEqual, which does not
         // return early on the first difference. String.equals does, and the
         // time it takes leaks how much of a guess was right.
-        return MessageDigest.isEqual(fromHex(expected), fromHex(actual));
+        try {
+            return MessageDigest.isEqual(fromHex(expected), fromHex(actual));
+        } catch (IllegalArgumentException malformed) {
+            return false;
+        }
     }
 
     /**

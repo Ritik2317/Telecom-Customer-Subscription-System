@@ -16,6 +16,13 @@ bin/
 
 *.csv
 reports/
+/.env
+/.env.*
+!/.env.example
+/application.properties
+/tcsms.properties
+*.pem
+*.key
 
 .DS_Store
 Thumbs.db

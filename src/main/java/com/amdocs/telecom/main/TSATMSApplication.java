@@ -127,6 +127,11 @@ public final class TSATMSApplication {
     private static final String HELP_FLAG = "--help";
 
     public static void main(String[] args) {
+        if (args.length == 0 || !"--legacy".equals(args[0])) {
+            com.amdocs.telecom.bss.main.TcsmsApplication.main(args);
+            return;
+        }
+        args = java.util.Arrays.copyOfRange(args, 1, args.length);
         int exitCode;
         try {
             if (hasFlag(args, HELP_FLAG)) {

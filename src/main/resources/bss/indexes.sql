@@ -1,0 +1,9 @@
+CREATE INDEX bss_usage_month ON bss_usage(subscription_id,usage_date);
+CREATE INDEX bss_usage_pending ON bss_usage(status,subscription_id);
+CREATE INDEX bss_bills_overdue ON bss_bills(status,due_date);
+CREATE INDEX bss_history_time ON bss_subscription_history(subscription_id,change_date);
+CREATE INDEX bss_addon_time ON bss_addon_history(subscription_id,plan_id,change_date);
+CREATE INDEX bss_notifications_inbox ON bss_notifications(user_id,status);
+CREATE INDEX bss_login_user ON bss_login_history(user_id,login_time);
+CREATE INDEX bss_customer_city ON bss_customers(city);
+CREATE INDEX bss_complaints_status ON bss_complaints(status,customer_id);

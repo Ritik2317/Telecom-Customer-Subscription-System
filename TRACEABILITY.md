@@ -1,5 +1,11 @@
 # Requirement Traceability
 
+**Current PDF coverage:** see [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md).
+The retained mapping below documents the original trouble-ticket/SLA OSS case
+study, which differs from the supplied Customer & Subscription Management PDF.
+Legacy commands require `--legacy` before the original switches. The original
+Java upgrade edits in this file are retained.
+
 Every numbered section of the case study, and every item in the four common
 requirement lists, mapped to the code that implements it and the check that
 proves it.
@@ -280,7 +286,7 @@ operation; the people running it change it.
 
 ---
 
-## Section 16 — Java 8 requirements
+## Section 16 — Java API requirements
 
 All nine analyses are in `TicketAnalytics`. Proved by `--verify-reports`
 and `--demo`.
@@ -302,7 +308,7 @@ workload who have the required specialization and are currently available* —
 is `EngineerRecommender`, and `--verify-assign` checks it returns exactly
 that.
 
-| Java 8 feature | Where |
+| Java language/API feature | Where |
 |---|---|
 | Lambdas | throughout; `RowMapper`, `Menu` options, comparators |
 | Functional interfaces | `RowMapper`, `SlaClock`, `TicketEventListener` |

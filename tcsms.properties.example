@@ -1,0 +1,15 @@
+# Copy to tcsms.properties (ignored by Git). Environment variables take precedence.
+# Use a MySQL database and account that YOU own. No legacy credentials are reused.
+db.url=jdbc:mysql://localhost:3306/tcsms?sslMode=VERIFY_IDENTITY&serverTimezone=Asia/Kolkata
+db.user=CHANGE_ME
+db.password=CHANGE_ME
+timezone=Asia/Kolkata
+tax.rate=0.18
+billing.due.days=20
+report.directory=reports/tcsms
+
+# Optional until password recovery is needed. Your HTTPS delivery endpoint must
+# accept {"recipient":"...","code":"...","expiresInSeconds":300} and send the code.
+# It must authenticate Authorization: Bearer <token>; 2xx means accepted.
+recovery.url=
+recovery.token=

@@ -1,0 +1,137 @@
+-- Additive, separate BSS tables. Never drops or seeds existing data.
+CREATE TABLE IF NOT EXISTS bss_system (id INT PRIMARY KEY, schema_version INT NOT NULL);
+CREATE TABLE IF NOT EXISTS bss_users (
+ id BIGINT AUTO_INCREMENT PRIMARY KEY, username VARCHAR(50) NOT NULL UNIQUE,
+ password_hash VARCHAR(128) NOT NULL, salt VARCHAR(64) NOT NULL,
+ email VARCHAR(120) NOT NULL UNIQUE, role VARCHAR(16) NOT NULL CHECK(role IN ('ADMIN','CUSTOMER')),
+ status VARCHAR(16) NOT NULL DEFAULT 'ACTIVE' CHECK(status IN ('ACTIVE','DISABLED')),
+ failed_attempts INT NOT NULL DEFAULT 0, locked_until TIMESTAMP NULL, last_login TIMESTAMP NULL,
+ credential_version INT NOT NULL DEFAULT 0,
+ created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS bss_customers (
+ id BIGINT AUTO_INCREMENT PRIMARY KEY, customer_number VARCHAR(48) NOT NULL UNIQUE,
+ user_id BIGINT NOT NULL UNIQUE, first_name VARCHAR(80) NOT NULL,
+ last_name VARCHAR(80) NOT NULL, date_of_birth DATE NOT NULL, mobile_number VARCHAR(20) NOT NULL UNIQUE,
+ address VARCHAR(300) NOT NULL, city VARCHAR(100) NOT NULL, country VARCHAR(100) NOT NULL,
+ created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ FOREIGN KEY(user_id) REFERENCES bss_users(id)
+);
+CREATE TABLE IF NOT EXISTS bss_sessions (
+ token_hash VARCHAR(64) PRIMARY KEY, user_id BIGINT NOT NULL,
+ credential_version INT NOT NULL, expires_at TIMESTAMP NOT NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ FOREIGN KEY(user_id) REFERENCES bss_users(id)
+);
+CREATE TABLE IF NOT EXISTS bss_login_history (
+ id BIGINT AUTO_INCREMENT PRIMARY KEY, user_id BIGINT NULL,
+ username VARCHAR(50) NOT NULL, outcome VARCHAR(30) NOT NULL,
+ login_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, logout_time TIMESTAMP NULL,
+ session_hash VARCHAR(64) NULL, FOREIGN KEY(user_id) REFERENCES bss_users(id)
+);
+CREATE TABLE IF NOT EXISTS bss_recovery (
+ user_id BIGINT PRIMARY KEY, code_hash VARCHAR(64) NOT NULL,
+ attempts INT NOT NULL DEFAULT 0, expires_at TIMESTAMP NOT NULL,
+ created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(user_id) REFERENCES bss_users(id)
+);
+CREATE TABLE IF NOT EXISTS bss_plans (
+ id BIGINT AUTO_INCREMENT PRIMARY KEY, plan_code VARCHAR(40) NOT NULL UNIQUE, plan_name VARCHAR(100) NOT NULL,
+ plan_type VARCHAR(16) NOT NULL CHECK(plan_type IN ('PREPAID','POSTPAID','ADDON')),
+ monthly_rental DECIMAL(14,2) NOT NULL CHECK(monthly_rental >= 0),
+ data_gb DECIMAL(14,4) NOT NULL CHECK(data_gb >= 0), voice_minutes INT NOT NULL CHECK(voice_minutes >= -1),
+ sms_allowance INT NOT NULL CHECK(sms_allowance >= 0), validity_days INT NOT NULL CHECK(validity_days > 0),
+ roaming BOOLEAN NOT NULL, active BOOLEAN NOT NULL, minimum_tenure_days INT NOT NULL DEFAULT 0 CHECK(minimum_tenure_days >= 0),
+ allow_type_change BOOLEAN NOT NULL DEFAULT FALSE,
+ data_rate DECIMAL(14,4) NOT NULL CHECK(data_rate >= 0), voice_rate DECIMAL(14,4) NOT NULL CHECK(voice_rate >= 0),
+ sms_rate DECIMAL(14,4) NOT NULL CHECK(sms_rate >= 0), roaming_rate DECIMAL(14,4) NOT NULL CHECK(roaming_rate >= 0),
+ created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS bss_sims (
+ id BIGINT AUTO_INCREMENT PRIMARY KEY, sim_number VARCHAR(32) NOT NULL UNIQUE,
+ mobile_number VARCHAR(20) NOT NULL UNIQUE, sim_type VARCHAR(16) NOT NULL CHECK(sim_type IN ('PHYSICAL_SIM','ESIM')),
+ status VARCHAR(16) NOT NULL CHECK(status IN ('AVAILABLE','ASSIGNED','RETIRED')),
+ created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS bss_subscriptions (
+ id BIGINT AUTO_INCREMENT PRIMARY KEY, subscription_number VARCHAR(48) NOT NULL UNIQUE,
+ customer_id BIGINT NOT NULL, sim_id BIGINT NOT NULL UNIQUE,
+ plan_id BIGINT NOT NULL, subscription_type VARCHAR(16) NOT NULL CHECK(subscription_type IN ('PREPAID','POSTPAID')),
+ status VARCHAR(24) NOT NULL CHECK(status IN ('ACTIVE','SUSPENDED','OVERDUE','EXPIRED')),
+ activation_date DATE NOT NULL, plan_changed_at DATE NOT NULL,
+ created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ UNIQUE(customer_id,plan_id), FOREIGN KEY(customer_id) REFERENCES bss_customers(id),
+ FOREIGN KEY(sim_id) REFERENCES bss_sims(id), FOREIGN KEY(plan_id) REFERENCES bss_plans(id)
+);
+CREATE TABLE IF NOT EXISTS bss_subscription_history (
+ id BIGINT AUTO_INCREMENT PRIMARY KEY, subscription_id BIGINT NOT NULL,
+ old_plan_id BIGINT NULL, new_plan_id BIGINT NOT NULL,
+ change_reason VARCHAR(300) NOT NULL, changed_by BIGINT NOT NULL,
+ change_date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ FOREIGN KEY(subscription_id) REFERENCES bss_subscriptions(id), FOREIGN KEY(old_plan_id) REFERENCES bss_plans(id),
+ FOREIGN KEY(new_plan_id) REFERENCES bss_plans(id), FOREIGN KEY(changed_by) REFERENCES bss_users(id)
+);
+CREATE TABLE IF NOT EXISTS bss_addons (
+ subscription_id BIGINT NOT NULL, plan_id BIGINT NOT NULL,
+ active BOOLEAN NOT NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(subscription_id,plan_id),
+ FOREIGN KEY(subscription_id) REFERENCES bss_subscriptions(id), FOREIGN KEY(plan_id) REFERENCES bss_plans(id)
+);
+CREATE TABLE IF NOT EXISTS bss_usage (
+ id BIGINT AUTO_INCREMENT PRIMARY KEY, event_reference VARCHAR(100) NOT NULL UNIQUE,
+ subscription_id BIGINT NOT NULL, usage_date TIMESTAMP NOT NULL,
+ usage_type VARCHAR(16) NOT NULL CHECK(usage_type IN ('VOICE','SMS','DATA','ROAMING')),
+ quantity DECIMAL(18,4) NOT NULL CHECK(quantity > 0), unit VARCHAR(16) NOT NULL,
+ charge DECIMAL(14,2) NOT NULL DEFAULT 0 CHECK(charge >= 0),
+ status VARCHAR(16) NOT NULL CHECK(status IN ('PENDING','PROCESSED')),
+ created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ FOREIGN KEY(subscription_id) REFERENCES bss_subscriptions(id)
+);
+CREATE TABLE IF NOT EXISTS bss_bills (
+ id BIGINT AUTO_INCREMENT PRIMARY KEY, bill_number VARCHAR(64) NOT NULL UNIQUE,
+ subscription_id BIGINT NOT NULL, billing_month VARCHAR(7) NOT NULL,
+ plan_rental DECIMAL(14,2) NOT NULL CHECK(plan_rental >= 0), usage_charges DECIMAL(14,2) NOT NULL CHECK(usage_charges >= 0),
+ tax_amount DECIMAL(14,2) NOT NULL CHECK(tax_amount >= 0), discount DECIMAL(14,2) NOT NULL CHECK(discount >= 0),
+ total_amount DECIMAL(14,2) NOT NULL CHECK(total_amount >= 0), due_date DATE NOT NULL,
+ status VARCHAR(16) NOT NULL CHECK(status IN ('UNPAID','PAID')),
+ created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ UNIQUE(subscription_id,billing_month), FOREIGN KEY(subscription_id) REFERENCES bss_subscriptions(id)
+);
+CREATE TABLE IF NOT EXISTS bss_payments (
+ id BIGINT AUTO_INCREMENT PRIMARY KEY, transaction_reference VARCHAR(100) NOT NULL UNIQUE,
+ bill_id BIGINT NOT NULL UNIQUE, customer_id BIGINT NOT NULL,
+ amount DECIMAL(14,2) NOT NULL CHECK(amount > 0), payment_mode VARCHAR(20) NOT NULL CHECK(payment_mode IN ('UPI','CARD','NET_BANKING','BANK_TRANSFER')),
+ status VARCHAR(16) NOT NULL CHECK(status = 'CONFIRMED'), payment_date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ FOREIGN KEY(bill_id) REFERENCES bss_bills(id), FOREIGN KEY(customer_id) REFERENCES bss_customers(id)
+);
+CREATE TABLE IF NOT EXISTS bss_complaints (
+ id BIGINT AUTO_INCREMENT PRIMARY KEY, complaint_number VARCHAR(48) NOT NULL UNIQUE,
+ customer_id BIGINT NOT NULL, subscription_id BIGINT NOT NULL,
+ category VARCHAR(16) NOT NULL CHECK(category IN ('BILLING','NETWORK','SIM','PLAN','PAYMENT','OTHER')),
+ description VARCHAR(2000) NOT NULL, priority VARCHAR(16) NOT NULL CHECK(priority IN ('LOW','MEDIUM','HIGH','CRITICAL')),
+ status VARCHAR(16) NOT NULL CHECK(status IN ('OPEN','IN_PROGRESS','RESOLVED')),
+ resolution VARCHAR(2000) NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ FOREIGN KEY(customer_id) REFERENCES bss_customers(id), FOREIGN KEY(subscription_id) REFERENCES bss_subscriptions(id)
+);
+CREATE TABLE IF NOT EXISTS bss_notifications (
+ id BIGINT AUTO_INCREMENT PRIMARY KEY, user_id BIGINT NOT NULL,
+ message VARCHAR(1000) NOT NULL, status VARCHAR(16) NOT NULL CHECK(status IN ('PENDING','DELIVERED','READ')),
+ created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ FOREIGN KEY(user_id) REFERENCES bss_users(id)
+);
+CREATE TABLE IF NOT EXISTS bss_audit (
+ id BIGINT AUTO_INCREMENT PRIMARY KEY, actor VARCHAR(64) NOT NULL, action VARCHAR(64) NOT NULL,
+ entity_id BIGINT NOT NULL, details VARCHAR(500) NOT NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS bss_addon_history (
+ id BIGINT AUTO_INCREMENT PRIMARY KEY, subscription_id BIGINT NOT NULL, plan_id BIGINT NOT NULL,
+ active BOOLEAN NOT NULL, change_date TIMESTAMP NOT NULL, changed_by BIGINT NOT NULL,
+ FOREIGN KEY(subscription_id) REFERENCES bss_subscriptions(id), FOREIGN KEY(plan_id) REFERENCES bss_plans(id),
+ FOREIGN KEY(changed_by) REFERENCES bss_users(id)
+);
+CREATE TABLE IF NOT EXISTS bss_month_terms (
+ subscription_id BIGINT NOT NULL, billing_month VARCHAR(7) NOT NULL, rental DECIMAL(14,2) NOT NULL,
+ data_gb DECIMAL(14,4) NOT NULL, voice_minutes INT NOT NULL, sms_allowance INT NOT NULL, roaming BOOLEAN NOT NULL,
+ data_rate DECIMAL(14,4) NOT NULL, voice_rate DECIMAL(14,4) NOT NULL, sms_rate DECIMAL(14,4) NOT NULL, roaming_rate DECIMAL(14,4) NOT NULL,
+ created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(subscription_id,billing_month),
+ FOREIGN KEY(subscription_id) REFERENCES bss_subscriptions(id)
+);

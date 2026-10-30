@@ -97,7 +97,8 @@ public final class ConfigLoader {
      * Returns a property, or empty when absent or blank.
      */
     public Optional<String> find(String key) {
-        String value = properties.getProperty(key);
+        String value = System.getenv(key.toUpperCase(java.util.Locale.ROOT).replace('.', '_').replace('-', '_'));
+        if (value == null) value = properties.getProperty(key);
         if (value == null || value.trim().isEmpty()) {
             return Optional.empty();
         }

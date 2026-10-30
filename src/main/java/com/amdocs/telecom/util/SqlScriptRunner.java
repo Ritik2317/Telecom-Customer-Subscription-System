@@ -56,9 +56,8 @@ public final class SqlScriptRunner {
                 } catch (SQLException cause) {
                     throw new DataAccessException(ErrorCode.DB_QUERY_FAILED,
                             "Failed in " + resourcePath + " at statement " + (executed + 1)
-                                    + ": " + cause.getMessage()
-                                    + System.lineSeparator() + "  SQL: " + abbreviate(sql),
-                            cause);
+                            + "; SQL state " + cause.getSQLState()
+                                    + ", vendor code " + cause.getErrorCode());
                 }
             }
         } catch (SQLException cause) {

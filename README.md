@@ -1,7 +1,37 @@
-# TSATMS — Telecom Service Assurance & Trouble Ticket Management System
+# TCSMS — Customer & Subscription Management
+
+The default application now implements the supplied **Customer & Subscription
+Management** case study: customer/admin login, onboarding, plans, SIMs,
+subscriptions, usage, bills, confirmed payments, complaints and reports.
+
+Start with the [current setup and architecture guide](docs/SETUP.md) and
+[requirements, gap analysis and verification report](docs/IMPLEMENTATION.md).
+Copy `tcsms.properties.example` to ignored `tcsms.properties`, configure **your
+own** MySQL account, then run:
+
+```powershell
+mvn test
+mvn package
+java -jar target/tsatms-jar-with-dependencies.jar --init
+java -jar target/tsatms-jar-with-dependencies.jar --create-admin
+java -jar target/tsatms-jar-with-dependencies.jar
+```
+
+No default credentials or production demonstration records are installed.
+
+---
+
+# Legacy TSATMS — Telecom Service Assurance & Trouble Ticket Management System
+
+**The retained documentation below describes the original, separate OSS product.
+Its commands now require `--legacy` before any flags**, for example
+`java -jar target/tsatms-jar-with-dependencies.jar --legacy --help`.
+Do not run legacy database setup on a database containing data you need: its
+original schema scripts drop/recreate legacy tables. The new BSS `--init` uses
+separate additive tables and never invokes those scripts.
 
 A console-based telecom OSS for incident, fault, SLA and support management,
-built to the *Preboarding Batch* case study. Java 8, MySQL, Maven, no
+built to the *Preboarding Batch* case study. Java 25 LTS, MySQL, Maven, no
 frontend.
 
 One incident is captured, prioritised against an SLA, assigned to the right
@@ -14,8 +44,8 @@ complete audit trail and a set of reports over the whole operation.
 
 | | Version used | Notes |
 |---|---|---|
-| JDK | 1.8 | The source and target level are both `1.8`; nothing later is used. |
-| Maven | 3.3.9+ | Any 3.x. The build works offline once the connector is cached. |
+| JDK | 25 LTS | The project compiles with `--release 25`; use JDK 25 or newer. |
+| Maven | 3.9.11 | Tested build version; the build works offline once the connector is cached. |
 | MySQL | 8.0 | Running on `localhost:3306`. |
 
 Only one external dependency: `mysql-connector-java` 8.0.30. There is no
